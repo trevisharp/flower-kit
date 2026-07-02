@@ -1,14 +1,14 @@
 using System;
 using System.Linq;
+using System.Buffers;
 using System.Dynamic;
-using System.Collections.Generic;
 using System.Reflection;
 using System.Linq.Expressions;
-using System.Buffers;
+using System.Collections.Generic;
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 
-namespace FlowerKit.Internal;
+namespace FlowerKit.Core;
 
 /// <summary>
 /// A publisher to handle Event.Publish calls.
@@ -36,10 +36,8 @@ public class Publisher<T> : DynamicObject
     /// <summary>
     /// Publish a event on system.
     /// </summary>
-    void Publish(T ev)
-    {
-        System.Console.WriteLine(ev);
-    }
+    static void Publish(T ev)
+        => Planner.ReceiveEvent(ev);
 
     public override bool TryInvoke(InvokeBinder binder, object?[]? args, out object? result)
     {

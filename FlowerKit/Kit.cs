@@ -3,16 +3,13 @@
 using System;
 using System.Collections.Generic;
 using System.Dynamic;
+using System.Numerics;
 using System.Reflection.Metadata;
+using FlowerKit.Core;
 
 namespace FlowerKit;
 
 public static class Kit
 {
-    public static void Publish<T>(T eventData)
-    {
-        
-    }
-
-    public static dynamic ev { get; set; } = new EventDefinition();
+    
 }

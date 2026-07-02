@@ -1,6 +1,6 @@
-using FlowerKit.Internal;
-
 namespace FlowerKit;
+
+using Core;
 
 /// <summary>
 /// A event object keep the event metadata.
