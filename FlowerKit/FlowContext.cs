@@ -6,5 +6,5 @@ namespace FlowerKit;
 public class FlowContext<T>
     where T : Event<T>
 {
-    public required T Body { get; set; }
+    public required T Data { get; set; }
 }
