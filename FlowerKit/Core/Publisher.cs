@@ -1,19 +1,20 @@
 using System;
 using System.Linq;
-using System.Buffers;
 using System.Dynamic;
 using System.Reflection;
 using System.Linq.Expressions;
 using System.Collections.Generic;
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
+using FlowerKit.Core.EventOperators;
+using System.Diagnostics;
 
 namespace FlowerKit.Core;
 
 using ConstructorFunc = Func<object?[], object>;
 
 /// <summary>
-/// A publisher to handle Event.Publish calls.
+/// A publisher to handle Publish<Event>.Emit calls.
 /// </summary>
 public class Publisher : DynamicObject
 {
@@ -53,25 +54,50 @@ public class Publisher : DynamicObject
     {
         if (args is null)
             throw new Exception($"The publish of {Type} may receive values.");
-
-        var factory = GetPublishFactory(binder.CallInfo.ArgumentNames);
+        
+        var arguments = ProcessSpecialEvents(binder, args);
+        var factory = GetPublishFactory(arguments, args);
         var eventPayload = factory(args);
         Planner.ReceiveEvent(eventPayload);
 
         result = null;
         return true;
     }
+
+    static ReadOnlyCollection<string> ProcessSpecialEvents(InvokeBinder binder, object?[] args)
+    {        
+        var unnamedArgs = 
+            binder.CallInfo.ArgumentCount - binder.CallInfo.ArgumentNames.Count;
+        if (unnamedArgs == 0)
+            return binder.CallInfo.ArgumentNames;
+        
+        return [
+            ..args.Take(unnamedArgs).SelectMany((arg, i) => arg switch {
+                SpreadEvent spread => TakeSpreadFields(spread, i),
+                null => throw new Exception($"Invalid unnamed null arg on publishing."),
+                _ => throw new Exception($"Invalid unnamed arg type {arg.GetType()} on publishing.")
+            }),
+            ..binder.CallInfo.ArgumentNames
+        ];
+
+        static IEnumerable<string> TakeSpreadFields(SpreadEvent spread, int index)
+        {
+            var props = spread.Event.GetType().GetProperties();
+            foreach (var prop in props)
+                yield return $"~{index}~{prop.Name}";
+        }
+    }
     
     /// <summary>
     /// Get a cached factory for publish payload or create a newer if
     /// the args sequence dont match.
-    ConstructorFunc GetPublishFactory(ReadOnlyCollection<string> args)
+    ConstructorFunc GetPublishFactory(ReadOnlyCollection<string> args, object?[] values)
     {
         var hash = GetSignatureHash(args);
         if (FactoryMap.TryGetValue(hash, out var factory))
             return factory;
 
-        var newFactory = CreateNewFactory(Constructor, args);
+        var newFactory = CompilerNewFactory(Constructor, args, values);
         if (!FactoryMap.TryAdd(hash, newFactory))
             throw new Exception("Signature conflict. Try change order of parameters on call to fix.");
 
@@ -81,52 +107,82 @@ public class Publisher : DynamicObject
     /// <summary>
     /// Create a new factory based on args order and a constructor.
     /// </summary>
-    ConstructorFunc CreateNewFactory(
+    ConstructorFunc CompilerNewFactory(
         ConstructorInfo ctor,
-        ReadOnlyCollection<string> args
+        ReadOnlyCollection<string> args,
+        object?[] values
     )
     {
-        int[] indexMap = new int[CtorParameters.Length];
+        int i = 0;
+        Dictionary<string, int> namedMap = [];
+        foreach (var arg in args)
+        {
+            if (arg.StartsWith('~'))
+            {
+                var parts = arg.Split('~', StringSplitOptions.RemoveEmptyEntries);
+                var name = $"~{parts[1]}";
+                var index = int.Parse(parts[0]);
+                namedMap[name] = index;
+                i = index + 1;
+                continue;
+            }
+            
+            namedMap[arg] = i++;
+        }
+        
+        var argsParam = Expression.Parameter(typeof(object[]), "args");
+        var ctorArgs = new List<Expression>();
 
-        Dictionary<string, int> callMap = [];
-        for (int i = 0; i < args.Count; i++)
-            callMap.Add(args[i], i);
-
-        int k = 0;
         foreach (var param in CtorParameters)
         {
-            if (!callMap.TryGetValue(param.Name!, out var index))
-                throw new Exception($"Missing value of '{param.Name}' on '{Type}' publishing call.");
+            if (param.Name is null)
+                throw new Exception($"Missing name for a parameter on type '{Type}'");
+            
+            if (namedMap.TryGetValue(param.Name, out var index))
+            {
+                ctorArgs.Add(FromIndex(param, index));
+                continue;
+            }
 
-            indexMap[k++] = index;
+            if (namedMap.TryGetValue("~" + param.Name, out var spreadIndex))
+            {
+                ctorArgs.Add(FromSpread(param, spreadIndex));
+                continue;
+            }
         }
 
-        return CompileFactory(ctor, indexMap);
-    }
-
-    /// <summary>
-    /// Compile a reflection call to call constructor faster.
-    /// </summary>
-    ConstructorFunc CompileFactory(ConstructorInfo ctor, int[] indexMap)
-    {
-        var args = Expression.Parameter(typeof(object[]), "args");
-
-        var ctorArgs = CtorParameters
-            .Zip(indexMap)
-            .Select(pair =>
-                Expression.Convert(
-                    Expression.ArrayIndex(args, Expression.Constant(pair.Second)),
-                    pair.First.ParameterType
-                )
-            ).ToArray();
-
         var body = Expression.New(ctor, ctorArgs);
-
         return Expression
-            .Lambda<ConstructorFunc>(body, args)
+            .Lambda<ConstructorFunc>(body, argsParam)
             .Compile();
+        
+        Expression FromIndex(ParameterInfo param, int index)
+        {
+            return Expression.Convert(
+                Expression.ArrayIndex(argsParam, Expression.Constant(index)),
+                param.ParameterType
+            );
+        }
+
+        Expression FromSpread(ParameterInfo param, int index)
+        {
+            var spread = (SpreadEvent)values[index]!;
+            return Expression.Property(
+                Expression.Convert(
+                    Expression.Field(
+                        Expression.Convert(
+                            Expression.ArrayIndex(argsParam, Expression.Constant(index)),
+                            typeof(SpreadEvent)
+                        ),
+                        "Event"
+                    ),
+                    spread.Event.GetType()
+                ),
+                param.Name!
+            );
+        }
     }
-    
+
     /// <summary>
     /// Generate a hash from a named call of functions.
     /// </summary>

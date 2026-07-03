@@ -10,7 +10,8 @@ public class DelegateFlow<T>(Action<FlowContext<T>> action) : Flow
 {
     public override void Run(object ctx)
         => action(
-            ctx as FlowContext<T> ?? 
-            throw new Exception("Context is null.")
+            new FlowContext<T> {
+                Data = (T)ctx
+            }
         );
 }

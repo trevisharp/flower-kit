@@ -18,6 +18,6 @@ public class DefaultPlanner : IPlanner
     public void OnReceiveEvent(object ev)
     {
         var flow = flowMap[ev.GetType().ToString()];
-        flow.Run(null);
+        flow.Run(ev);
     }
 }
