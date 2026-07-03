@@ -10,52 +10,62 @@ using System.Collections.ObjectModel;
 
 namespace FlowerKit.Core;
 
+using ConstructorFunc = Func<object?[], object>;
+
 /// <summary>
 /// A publisher to handle Event.Publish calls.
 /// </summary>
-public class Publisher<T> : DynamicObject
-    where T : Event<T>
+public class Publisher : DynamicObject
 {
-    static readonly Type Type;
-    static readonly ConstructorInfo Constructor;
-    static readonly ParameterInfo[] CtorParameters;
-    static readonly ConcurrentDictionary<int, Func<object?[], T>> FactoryMap = [];
+    private static readonly ConcurrentDictionary<Type, Publisher> publisherMap = new();
 
-    static Publisher()
+    /// <summary>
+    /// Get a publisher for events of a specified type.
+    /// </summary>
+    public static Publisher Get(Type type)
     {
-        Type = typeof(T);
-        
-        Constructor = Type
+        if (publisherMap.TryGetValue(type, out var pub))
+            return pub;
+
+        pub = new Publisher(type);
+        publisherMap.TryAdd(type, pub);
+        return pub;
+    }
+
+    readonly Type Type;
+    readonly ConstructorInfo Constructor;
+    readonly ParameterInfo[] CtorParameters;
+    readonly ConcurrentDictionary<int, ConstructorFunc> FactoryMap = [];
+
+    public Publisher(Type pubType)
+    {
+        Type = pubType;
+
+        Constructor = pubType
             .GetConstructors()
-            .FirstOrDefault() 
-            ?? throw new Exception($"The type {Type} may contains a public constructor.");
+            .FirstOrDefault()
+            ?? throw new Exception($"The type {pubType} may contains a public constructor.");
 
         CtorParameters = Constructor.GetParameters();
     }
-
-    /// <summary>
-    /// Publish a event on system.
-    /// </summary>
-    static void Publish(T ev)
-        => Planner.ReceiveEvent(ev);
-
+    
     public override bool TryInvoke(InvokeBinder binder, object?[]? args, out object? result)
     {
         if (args is null)
-            throw new Exception($"The publish of {Type} may receive values."); 
+            throw new Exception($"The publish of {Type} may receive values.");
 
         var factory = GetPublishFactory(binder.CallInfo.ArgumentNames);
         var eventPayload = factory(args);
-        Publish(eventPayload);
+        Planner.ReceiveEvent(eventPayload);
 
         result = null;
         return true;
     }
-
+    
     /// <summary>
     /// Get a cached factory for publish payload or create a newer if
     /// the args sequence dont match.
-    static Func<object?[], T> GetPublishFactory(ReadOnlyCollection<string> args)
+    ConstructorFunc GetPublishFactory(ReadOnlyCollection<string> args)
     {
         var hash = GetSignatureHash(args);
         if (FactoryMap.TryGetValue(hash, out var factory))
@@ -64,27 +74,14 @@ public class Publisher<T> : DynamicObject
         var newFactory = CreateNewFactory(Constructor, args);
         if (!FactoryMap.TryAdd(hash, newFactory))
             throw new Exception("Signature conflict. Try change order of parameters on call to fix.");
-        
+
         return newFactory;
     }
-
-    /// <summary>
-    /// Generate a hash from a named call of functions.
-    /// </summary>
-    static int GetSignatureHash(ReadOnlyCollection<string> args)
-    {
-        var hash = new HashCode();
-
-        foreach (var name in args)
-            hash.Add(name);
-
-        return hash.ToHashCode();
-    }
-
+    
     /// <summary>
     /// Create a new factory based on args order and a constructor.
     /// </summary>
-    static Func<object?[], T> CreateNewFactory(
+    ConstructorFunc CreateNewFactory(
         ConstructorInfo ctor,
         ReadOnlyCollection<string> args
     )
@@ -94,13 +91,13 @@ public class Publisher<T> : DynamicObject
         Dictionary<string, int> callMap = [];
         for (int i = 0; i < args.Count; i++)
             callMap.Add(args[i], i);
-        
+
         int k = 0;
         foreach (var param in CtorParameters)
         {
             if (!callMap.TryGetValue(param.Name!, out var index))
                 throw new Exception($"Missing value of '{param.Name}' on '{Type}' publishing call.");
-            
+
             indexMap[k++] = index;
         }
 
@@ -110,7 +107,7 @@ public class Publisher<T> : DynamicObject
     /// <summary>
     /// Compile a reflection call to call constructor faster.
     /// </summary>
-    static Func<object?[], T> CompileFactory(ConstructorInfo ctor, int[] indexMap)
+    ConstructorFunc CompileFactory(ConstructorInfo ctor, int[] indexMap)
     {
         var args = Expression.Parameter(typeof(object[]), "args");
 
@@ -126,7 +123,20 @@ public class Publisher<T> : DynamicObject
         var body = Expression.New(ctor, ctorArgs);
 
         return Expression
-            .Lambda<Func<object?[], T>>(body, args)
+            .Lambda<ConstructorFunc>(body, args)
             .Compile();
+    }
+    
+    /// <summary>
+    /// Generate a hash from a named call of functions.
+    /// </summary>
+    static int GetSignatureHash(ReadOnlyCollection<string> args)
+    {
+        var hash = new HashCode();
+
+        foreach (var name in args)
+            hash.Add(name);
+
+        return hash.ToHashCode();
     }
 }

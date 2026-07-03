@@ -13,7 +13,7 @@ public abstract class Flow
     public abstract void Run(object ctx);
 
     public static Flow On<T>(Action<FlowContext<T>> func)
-        where T : Event<T>
+        where T : Event
     {
         var flow = new DelegateFlow<T>(func);
         Planner.AddPlan(flow, typeof(T));

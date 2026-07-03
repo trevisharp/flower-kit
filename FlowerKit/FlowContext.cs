@@ -4,7 +4,7 @@ namespace FlowerKit;
 /// Represents the context of current executing flow.
 /// </summary>
 public class FlowContext<T>
-    where T : Event<T>
+    where T : Event
 {
     public required T Data { get; set; }
 }
