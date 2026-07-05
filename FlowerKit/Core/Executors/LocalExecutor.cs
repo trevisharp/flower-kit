@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace FlowerKit.Core.Executors;
 
 /// <summary>
@@ -5,13 +7,24 @@ namespace FlowerKit.Core.Executors;
 /// </summary>
 public class LocalExecutor : IExecutor
 {
-    public void Publish(Event ev)
+    readonly Dictionary<string, Flow> flows = [];
+
+    public void Publish(object ev)
     {
-        throw new System.NotImplementedException();
+        var flow = flows[ev.GetType().Name];
+        flow.Run(ev);
     }
 
     public void Run()
     {
-        
+        var planner = Planner.Current;
+
+        foreach (var planned in planner.PlannedFlows)
+        {
+            flows.Add(
+                planned.EventType.ToString(),
+                planned.Flow
+            );
+        }
     }
 }

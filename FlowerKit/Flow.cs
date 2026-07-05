@@ -11,9 +11,9 @@ using Core.Flows;
 public abstract class Flow
 {
     /// <summary>
-    /// Run the flow based on a context object.
+    /// Run the flow based on a event object.
     /// </summary>
-    public abstract void Run(object ctx);
+    public abstract void Run(object ev);
 
     /// <summary>
     /// Add a flow to plan.

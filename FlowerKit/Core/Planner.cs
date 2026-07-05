@@ -9,9 +9,7 @@ namespace FlowerKit.Core;
 public class Planner
 {
     public static Planner Current { get; private set; } = new Planner();
-
-    readonly Dictionary<string, Flow> flowMap = [];
-    readonly List<PlanedFlow> plannedFlows = [];
+    public List<PlanedFlow> PlannedFlows { get; private set; } = [];
 
     /// <summary>
     /// Add a plan to run a flow when a event is published.
@@ -21,8 +19,11 @@ public class Planner
         ArgumentNullException.ThrowIfNull(flow, nameof(flow));
         ArgumentNullException.ThrowIfNull(eventType, nameof(eventType));
         
-        plannedFlows.Add(new(flow, eventType));
+        PlannedFlows.Add(new(flow, eventType));
     }
 
-    record PlanedFlow(Flow Flow, Type EventType);
+    public record PlanedFlow(
+        Flow Flow,
+        Type EventType
+    );
 }

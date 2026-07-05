@@ -8,13 +8,12 @@ namespace FlowerKit.Core.Flows;
 public class DelegateFlow<T>(Action<FlowContext<T>> action) : Flow
     where T : Event
 {
-    public override void Run(object ctx)
+    public override void Run(object ev)
         => action(
             new FlowContext<T> {
-                Data = (T)ctx
+                Data = (T)ev
             }
         );
     public override void Plan()
-        => Planner.AddToPlan(this, typeof(T));
-
+        => Planner.Current.AddToPlan(this, typeof(T));
 }

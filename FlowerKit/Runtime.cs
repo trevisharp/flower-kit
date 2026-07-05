@@ -1,8 +1,9 @@
 using System;
+using System.Runtime.CompilerServices;
 
-namespace FlowerKit.Core;
+namespace FlowerKit;
 
-using Executors;
+using Core.Executors;
 
 /// <summary>
 /// The main runtime aplication.
@@ -14,16 +15,17 @@ public static class Runtime
     /// <summary>
     /// Publish a new event.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void Publish(object ev)
-    {
-        
-    }
+        => CurrentExecutor.Publish(ev);
 
     /// <summary>
     /// Start application.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void Run()
     {
         ArgumentNullException.ThrowIfNull(CurrentExecutor, nameof(CurrentExecutor));
+        CurrentExecutor.Run();
     }
 }

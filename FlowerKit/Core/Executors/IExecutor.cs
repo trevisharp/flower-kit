@@ -1,10 +1,10 @@
-namespace FlowerKit.Core;
+namespace FlowerKit.Core.Executors;
 
 /// <summary>
 /// A engine executor implementation.
 /// </summary>
 public interface IExecutor
 {
-    void Publish(Event ev);
+    void Publish(object ev);
     void Run();
 }
