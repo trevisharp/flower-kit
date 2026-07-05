@@ -1,4 +1,4 @@
-namespace FlowerKit;
+namespace FlowerKit.Core;
 
 /// <summary>
 /// Represents the context of current executing flow.

@@ -1,6 +1,6 @@
 using System;
 
-namespace FlowerKit.Flows;
+namespace FlowerKit.Core.Flows;
 
 /// <summary>
 /// A flow that runs a simple Action.
@@ -14,4 +14,7 @@ public class DelegateFlow<T>(Action<FlowContext<T>> action) : Flow
                 Data = (T)ctx
             }
         );
+    public override void Plan()
+        => Planner.AddToPlan(this, typeof(T));
+
 }

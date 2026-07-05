@@ -58,7 +58,7 @@ public class Publisher : DynamicObject
         var arguments = ProcessSpecialEvents(binder, args);
         var factory = GetPublishFactory(arguments, args);
         var eventPayload = factory(args);
-        Planner.ReceiveEvent(eventPayload);
+        Runtime.Publish(eventPayload);
 
         result = null;
         return true;

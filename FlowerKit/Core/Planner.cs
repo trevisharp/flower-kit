@@ -1,29 +1,28 @@
 using System;
+using System.Collections.Generic;
 
 namespace FlowerKit.Core;
-
-using Planners;
 
 /// <summary>
 /// The main orchestrator for all published events.
 /// </summary>
-public static class Planner
+public class Planner
 {
-    public static IPlanner PlannerImplementation { get; set; } = new DefaultPlanner();
-    
-    /// <summary>
-    /// Send a new for the planner.
-    /// </summary>
-    public static void ReceiveEvent(object ev)
-    {
-        PlannerImplementation.OnReceiveEvent(ev);
-    }
+    public static Planner Current { get; private set; } = new Planner();
+
+    readonly Dictionary<string, Flow> flowMap = [];
+    readonly List<PlanedFlow> plannedFlows = [];
 
     /// <summary>
     /// Add a plan to run a flow when a event is published.
     /// </summary>
-    public static void AddPlan(Flow flow, Type eventType)
+    public void AddToPlan(Flow flow, Type eventType)
     {
-        PlannerImplementation.AddPlan(flow, eventType);
+        ArgumentNullException.ThrowIfNull(flow, nameof(flow));
+        ArgumentNullException.ThrowIfNull(eventType, nameof(eventType));
+        
+        plannedFlows.Add(new(flow, eventType));
     }
+
+    record PlanedFlow(Flow Flow, Type EventType);
 }
