@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Collections.Generic;
 
-namespace FlowerKit.Core.Reload;
+namespace FlowerKit.Core.Startup;
 
 /// <summary>
 /// A object to watch update and creation of files.

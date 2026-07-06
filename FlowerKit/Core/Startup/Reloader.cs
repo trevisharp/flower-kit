@@ -2,7 +2,7 @@ using System;
 using System.Reflection;
 using System.Collections.Generic;
 
-namespace FlowerKit.Core.Reload;
+namespace FlowerKit.Core.Startup;
 
 /// <summary>
 /// A Assembly reloader that get a new assembly when files changed.

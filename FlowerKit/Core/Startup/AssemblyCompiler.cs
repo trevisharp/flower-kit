@@ -7,7 +7,7 @@ using System.Collections.Generic;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 
-namespace FlowerKit.Core.Reload;
+namespace FlowerKit.Core.Startup;
 
 /// <summary>
 /// Compile and get a Assembly.
@@ -27,6 +27,17 @@ public class AssemblyCompiler
             ExtraReferences
         );
         return newAssembly;
+    }
+
+    /// <summary>
+    /// Get the syntax tree from files in 'MainDirectory'
+    /// </summary>
+    public virtual IEnumerable<SyntaxTree> GetSyntaxTrees()
+    {
+        var syntaxTrees = GetSyntaxTrees(
+            MainDirectory
+        );
+        return syntaxTrees;
     }
 
     protected virtual IEnumerable<string> FindAllCSharpFiles(
@@ -61,20 +72,29 @@ public class AssemblyCompiler
             .Append(Assembly.Load("System.Private.CoreLib"))
             .Concat(extraRefs);
         
-        return 
+        return
             from a in assemblies
             select a.Location into loc
             select MetadataReference.CreateFromFile(loc);
+    }
+
+    protected virtual IEnumerable<SyntaxTree> GetSyntaxTrees(
+        string directory)
+    {
+        var files = FindAllCSharpFiles(directory);
+
+        var syntaxTrees = files
+            .Select(File.ReadAllText)
+            .Select(text => CSharpSyntaxTree.ParseText(text));
+        
+        return syntaxTrees;
     }
 
     protected virtual Assembly? GetNewAssembly(
         string directory,
         IEnumerable<Assembly> extraRefs)
     {
-        var files = FindAllCSharpFiles(directory);
-        var syntaxTrees = files
-            .Select(File.ReadAllText)
-            .Select(text => CSharpSyntaxTree.ParseText(text));
+        var syntaxTrees = GetSyntaxTrees(directory);
 
         var compilationOptions = new CSharpCompilationOptions(
             OutputKind.ConsoleApplication

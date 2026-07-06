@@ -1,4 +1,4 @@
-namespace FlowerKit.Core.CodeAnalyzers;
+namespace FlowerKit.Core.Startup;
 
 /// <summary>
 /// A object to analyzer flow implementations and generate insights.
