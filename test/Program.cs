@@ -1,4 +1,5 @@
 ﻿using FlowerKit;
+using FlowerKit.Core;
 
 Flow.On<CollatzOdd>(ctx =>
 {
@@ -30,6 +31,7 @@ Flow.On<CollatzEnd>(ctx =>
     Console.WriteLine("Conjectura valida para um numero");
 });
 
+Runtime.Run();
 
 Publish<CollatzOdd>.Emit(
     Start: 7,
