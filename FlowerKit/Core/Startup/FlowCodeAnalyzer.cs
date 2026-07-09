@@ -12,6 +12,9 @@ namespace FlowerKit.Core.Startup;
 /// </summary>
 public class FlowCodeAnalyzer
 {
+    /// <summary>
+    /// Analize the code of the current running project.
+    /// </summary>
     public virtual void Analize()
     {
         var compiler = new AssemblyCompiler();
