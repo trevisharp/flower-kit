@@ -40,8 +40,7 @@ public class AssemblyCompiler
         return syntaxTrees;
     }
 
-    protected virtual IEnumerable<string> FindAllCSharpFiles(
-        string directory)
+    protected virtual IEnumerable<string> FindAllCSharpFiles(string directory)
     {
         var files = Directory.GetFiles(
             directory, "*.cs", 
@@ -60,8 +59,7 @@ public class AssemblyCompiler
             yield return file;
     }
 
-    protected virtual IEnumerable<MetadataReference> GetReferences(
-        IEnumerable<Assembly> extraRefs)
+    protected virtual IEnumerable<MetadataReference> GetReferences(IEnumerable<Assembly> extraRefs)
     {
         var assembly = Assembly.GetEntryAssembly();
         var assemblies = assembly!
@@ -78,8 +76,7 @@ public class AssemblyCompiler
             select MetadataReference.CreateFromFile(loc);
     }
 
-    protected virtual IEnumerable<SyntaxTree> GetSyntaxTrees(
-        string directory)
+    public virtual IEnumerable<SyntaxTree> GetSyntaxTrees(string directory)
     {
         var files = FindAllCSharpFiles(directory);
 

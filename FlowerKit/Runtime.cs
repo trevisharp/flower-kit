@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 namespace FlowerKit;
 
 using Core.Executors;
+using FlowerKit.Core.Startup;
 
 /// <summary>
 /// The main runtime aplication.
@@ -26,6 +27,10 @@ public static class Runtime
     public static void Run()
     {
         ArgumentNullException.ThrowIfNull(CurrentExecutor, nameof(CurrentExecutor));
+
+        var codeAnalizer = new FlowCodeAnalyzer();
+        codeAnalizer.Analize();
+
         CurrentExecutor.Run();
     }
 }
