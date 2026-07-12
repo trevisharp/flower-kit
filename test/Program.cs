@@ -1,6 +1,5 @@
 ﻿using FlowerKit;
 
-new CollatzWorkflow();
 Runtime.Run();
 
 Publish<CollatzOdd>.Emit(
