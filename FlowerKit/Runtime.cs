@@ -10,6 +10,7 @@ namespace FlowerKit;
 using Core.Graph;
 using Core.Executors;
 using Core.Startup;
+using Core.Testing;
 
 /// <summary>
 /// The main runtime aplication.
@@ -18,6 +19,8 @@ public static class Runtime
 {
     public static IExecutor CurrentExecutor { get; set; } = new LocalExecutor();
 
+    public static TestRunner TestRunner { get; set; } = new TestRunner();
+
     /// <summary>
     /// The event graph of the application, built at startup by <see cref="Run"/>.
     /// Used to wire the architecture (Executor, Kafka).
@@ -25,11 +28,49 @@ public static class Runtime
     public static FlowGraph? Graph { get; private set; }
 
     /// <summary>
+    /// The current environment (<see cref="Environments"/>). Resolved from the
+    /// <c>FLOWERKIT_ENVIRONMENT</c> environment variable (falling back to
+    /// <c>DOTNET_ENVIRONMENT</c>, then <see cref="Environments.Development"/>),
+    /// but can be overridden in code before calling <see cref="Run"/>.
+    /// </summary>
+    public static string Environment { get; set; } =
+        System.Environment.GetEnvironmentVariable("FLOWERKIT_ENVIRONMENT")
+        ?? System.Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT")
+        ?? Environments.Development;
+
+    /// <summary>
+    /// Every workflow instance found at startup, keyed by type name.
+    /// </summary>
+    public static IReadOnlyDictionary<string, Workflow> Workflows { get; private set; } =
+        new Dictionary<string, Workflow>();
+
+    static readonly List<Event> emittedTestEvents = [];
+
+    /// <summary>
+    /// Every event published so far, in order. Only recorded when
+    /// <see cref="Environment"/> is <see cref="Environments.Test"/>, so
+    /// <see cref="TestRunner"/> can evaluate assertions against it.
+    /// </summary>
+    public static IReadOnlyList<Event> EmittedTestEvents => emittedTestEvents;
+
+    /// <summary>
     /// Publish a new event.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void Publish(object ev)
-        => CurrentExecutor.Publish(ev);
+    {
+        if (Environment == Environments.Test && ev is Event e)
+            emittedTestEvents.Add(e);
+
+        CurrentExecutor.Publish(ev);
+    }
+
+    /// <summary>
+    /// Clears the recorded <see cref="EmittedTestEvents"/>. Used by <see cref="TestRunner"/>
+    /// to isolate the events of each test.
+    /// </summary>
+    static void ResetEmittedTestEvents()
+        => emittedTestEvents.Clear();
 
     /// <summary>
     /// Start application.
@@ -41,30 +82,70 @@ public static class Runtime
 
         var codeAnalizer = new FlowCodeAnalyzer();
         Graph = codeAnalizer.Analize();
-        
+
         InitWorkflows();
 
         CurrentExecutor.Run();
+
+        if (Environment == Environments.Test)
+            InitTests();
     }
 
+    /// <summary>
+    /// Instantiate and register all workflows of the project.
+    /// </summary>
     static void InitWorkflows()
     {
-        var workflows = 
-            from type in GetAllAssemblies().SelectMany(a => a.GetTypes())
+        var workflowTypes =
+            from type in GetlAllTypes()
             where type.IsClass
             where type.BaseType == typeof(Workflow)
             select type;
 
-        foreach (var workflow in workflows)
+        var workflows = new Dictionary<string, Workflow>();
+        foreach (var type in workflowTypes)
         {
-            var construtor = workflow.GetConstructor([]);
-            if (construtor is null)
+            var constructor = type.GetConstructor([]);
+            if (constructor is null)
                 continue;
-            
-            construtor.Invoke([]);
+
+            if (constructor.Invoke([]) is not Workflow workflow)
+                continue;
+
+            workflows[type.Name] = workflow;
+        }
+
+        Workflows = workflows;
+    }
+
+    /// <summary>
+    /// Instantiate and register all tests of the project.
+    /// </summary>
+    static void InitTests()
+    {
+        var testTypes =
+            from type in GetlAllTypes()
+            where type.IsClass
+            where type.BaseType == typeof(Test)
+            select type;
+
+        foreach (var type in testTypes)
+        {
+            var constructor = type.GetConstructor([]);
+            if (constructor is null)
+                continue;
+
+            if (constructor.Invoke([]) is not Test test)
+                continue;
+
+            ResetEmittedTestEvents();
+            TestRunner.RunTest(test);
         }
     }
     
+    static IEnumerable<Type> GetlAllTypes()
+        => GetAllAssemblies().SelectMany(GetLoadableTypes);
+
     static Assembly[] GetAllAssemblies()
     {
         var head = Assembly.GetEntryAssembly();
@@ -99,6 +180,18 @@ public static class Runtime
             {
                 Trace.TraceError($"The assembly {assemblyName} cannot be loaded. Exception: {ex.Message}");
             }
+        }
+    }
+    
+    static IEnumerable<Type> GetLoadableTypes(Assembly assembly)
+    {
+        try
+        {
+            return assembly.GetTypes();
+        }
+        catch (ReflectionTypeLoadException ex)
+        {
+            return ex.Types.Where(t => t is not null)!;
         }
     }
 }

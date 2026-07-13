@@ -8,6 +8,8 @@ namespace FlowerKit.Core.Flows;
 public class DelegateFlow<T>(Action<FlowContext<T>> action) : Flow
     where T : Event
 {
+    public override Type EventType => typeof(T);
+
     public override void Run(object ev)
         => action(
             new FlowContext<T> {

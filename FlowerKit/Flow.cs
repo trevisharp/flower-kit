@@ -21,6 +21,11 @@ public abstract class Flow
     public abstract void Plan();
 
     /// <summary>
+    /// The event type that triggers this flow.
+    /// </summary>
+    public abstract Type EventType { get; }
+
+    /// <summary>
     /// Create a new flow.
     /// </summary>
     public static Flow New<T>(Action<FlowContext<T>> func)

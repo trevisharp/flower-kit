@@ -19,6 +19,7 @@ public class FlowCodeAnalyzer
     const string EventMetadataName = "FlowerKit.Event";
     const string FlowMetadataName = "FlowerKit.Flow";
     const string PublishMetadataName = "FlowerKit.Publish`1";
+    const string WorkflowMetadataName = "FlowerKit.Workflow";
 
     /// <summary>
     /// The <see cref="Flow"/> factory methods that define a flow. Adding a new one
@@ -40,9 +41,10 @@ public class FlowCodeAnalyzer
         var compilation = compiler.GetCompilation();
 
         var events = CollectEvents(compilation);
+        var workflows = CollectWorkflows(compilation);
         var flows = CollectFlows(compilation);
 
-        var graph = new FlowGraph(events, flows);
+        var graph = new FlowGraph(events, workflows, flows);
         PrintGraph(graph);
         return graph;
     }
@@ -67,6 +69,25 @@ public class FlowCodeAnalyzer
     }
 
     /// <summary>
+    /// Collect every user-defined type that inherits from <see cref="Workflow"/>.
+    /// </summary>
+    protected virtual IReadOnlyCollection<string> CollectWorkflows(Compilation compilation)
+    {
+        var workflowSymbol = compilation.GetTypeByMetadataName(WorkflowMetadataName);
+        var workflows = new List<string>();
+        if (workflowSymbol is null)
+            return workflows;
+
+        foreach (var type in GetSourceTypes(compilation.GlobalNamespace))
+        {
+            if (InheritsFrom(type, workflowSymbol))
+                workflows.Add(type.Name);
+        }
+
+        return workflows;
+    }
+
+    /// <summary>
     /// Find every flow definition (a call to an anchor method on <see cref="Flow"/>)
     /// and resolve the events it may publish, in depth.
     /// </summary>
@@ -74,6 +95,7 @@ public class FlowCodeAnalyzer
     {
         var flowSymbol = compilation.GetTypeByMetadataName(FlowMetadataName);
         var publishSymbol = compilation.GetTypeByMetadataName(PublishMetadataName);
+        var workflowSymbol = compilation.GetTypeByMetadataName(WorkflowMetadataName);
         var nodes = new List<FlowNode>();
         if (flowSymbol is null)
             return nodes;
@@ -88,7 +110,7 @@ public class FlowCodeAnalyzer
 
             foreach (var invocation in invocations)
             {
-                var node = TryParseFlow(invocation, model, compilation, flowSymbol, publishSymbol);
+                var node = TryParseFlow(invocation, model, compilation, flowSymbol, publishSymbol, workflowSymbol);
                 if (node is not null)
                     nodes.Add(node);
             }
@@ -99,14 +121,16 @@ public class FlowCodeAnalyzer
 
     /// <summary>
     /// Try to read an invocation as a flow definition (e.g. <c>Flow.On&lt;T&gt;(...)</c>),
-    /// returning its node with the trigger event and every publishable event.
+    /// returning its node with the trigger event, every publishable event, and the
+    /// enclosing <see cref="Workflow"/> type (if any).
     /// </summary>
     protected virtual FlowNode? TryParseFlow(
         InvocationExpressionSyntax invocation,
         SemanticModel model,
         Compilation compilation,
         INamedTypeSymbol flowSymbol,
-        INamedTypeSymbol? publishSymbol
+        INamedTypeSymbol? publishSymbol,
+        INamedTypeSymbol? workflowSymbol
     )
     {
         if (model.GetSymbolInfo(invocation).Symbol is not IMethodSymbol method)
@@ -131,7 +155,35 @@ public class FlowCodeAnalyzer
             CollectFromDelegate(delegateArg, model, compilation, publishSymbol, publishes, visited);
         }
 
-        return new FlowNode(anchor, trigger, [.. publishes]);
+        var workflow = GetEnclosingWorkflow(invocation, model, workflowSymbol);
+
+        return new FlowNode(anchor, trigger, [.. publishes], workflow);
+    }
+
+    /// <summary>
+    /// Finds the name of the type declaration enclosing an invocation when that
+    /// type inherits from <see cref="Workflow"/> (e.g. a flow passed to the base
+    /// constructor of a workflow record).
+    /// </summary>
+    protected virtual string? GetEnclosingWorkflow(
+        SyntaxNode node,
+        SemanticModel model,
+        INamedTypeSymbol? workflowSymbol
+    )
+    {
+        if (workflowSymbol is null)
+            return null;
+
+        var typeDecl = node.Ancestors()
+            .OfType<TypeDeclarationSyntax>()
+            .FirstOrDefault();
+        if (typeDecl is null)
+            return null;
+
+        if (model.GetDeclaredSymbol(typeDecl) is not INamedTypeSymbol type)
+            return null;
+
+        return InheritsFrom(type, workflowSymbol) ? type.Name : null;
     }
 
     /// <summary>
@@ -297,6 +349,7 @@ public class FlowCodeAnalyzer
     {
         Console.WriteLine("FlowGraph:");
         Console.WriteLine($"  Events: {string.Join(", ", graph.Events)}");
+        Console.WriteLine($"  Workflows: {string.Join(", ", graph.Workflows)}");
 
         foreach (var flow in graph.Flows)
         {
@@ -304,7 +357,8 @@ public class FlowCodeAnalyzer
             var publishes = flow.Publishes.Count == 0
                 ? "-"
                 : string.Join(", ", flow.Publishes);
-            Console.WriteLine($"  [{flow.Anchor.Method}] {trigger} -> {publishes}");
+            var workflow = flow.Workflow ?? "(standalone)";
+            Console.WriteLine($"  [{workflow}] [{flow.Anchor.Method}] {trigger} -> {publishes}");
         }
     }
 }
