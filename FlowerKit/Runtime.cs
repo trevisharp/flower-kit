@@ -83,8 +83,8 @@ public static class Runtime
 
         ApplyConfigs(args ?? []);
 
-        var codeAnalizer = new FlowCodeAnalyzer();
-        Graph = codeAnalizer.Analize();
+        if (Environment != Environments.Production)
+            GenerateGraph();
 
         InitWorkflows();
 
@@ -111,9 +111,12 @@ public static class Runtime
         };
     }
 
-    /// <summary>
-    /// Instantiate and register all workflows of the project.
-    /// </summary>
+    static void GenerateGraph()
+    {
+        var codeAnalizer = new FlowCodeAnalyzer();
+        Graph = codeAnalizer.Analize();
+    }
+
     static void InitWorkflows()
     {
         var workflowTypes =
@@ -138,9 +141,6 @@ public static class Runtime
         Workflows = workflows;
     }
 
-    /// <summary>
-    /// Instantiate and register all tests of the project.
-    /// </summary>
     static void InitTests()
     {
         var testTypes =

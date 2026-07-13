@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 using System.Collections.Generic;
 
@@ -31,6 +32,13 @@ public class LocalExecutor : IExecutor
     public void Run()
     {
         BuildDispatchMap();
+
+        if (Runtime.Graph is null)
+            throw new Exception(
+                "Local executor need a Graph configure Kafka simulator." +
+                "This erros may occurs when the Runtime.CurrentExecutor" +
+                "is as LocalExecutor but the enviroment is Production."
+            );
 
         var workflowNames = new HashSet<string>(Runtime.Graph?.Workflows ?? []);
         foreach (var topics in topicsByEventType.Values)
