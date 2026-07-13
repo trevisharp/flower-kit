@@ -76,9 +76,12 @@ public static class Runtime
     /// Start application.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void Run()
+    public static void Run(string[]? args)
     {
         ArgumentNullException.ThrowIfNull(CurrentExecutor, nameof(CurrentExecutor));
+        ArgumentNullException.ThrowIfNull(TestRunner, nameof(TestRunner));
+
+        ApplyConfigs(args ?? []);
 
         var codeAnalizer = new FlowCodeAnalyzer();
         Graph = codeAnalizer.Analize();
@@ -89,6 +92,23 @@ public static class Runtime
 
         if (Environment == Environments.Test)
             InitTests();
+    }
+
+    static void ApplyConfigs(string[] args)
+    {
+        foreach (var arg in args)
+            ApplyConfig(arg);
+    }
+
+    static void ApplyConfig(string arg)
+    {
+        Environment = arg switch
+        {
+            "test" => Environments.Test,
+            "stag" => Environments.Staging,
+            "prod" => Environments.Production,
+            _ => Environment
+        };
     }
 
     /// <summary>

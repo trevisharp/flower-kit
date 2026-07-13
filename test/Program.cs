@@ -1,11 +1,6 @@
 ﻿using FlowerKit;
 
-Runtime.Run();
-
-Publish<CollatzOdd>.Emit(
-    Start: 7,
-    Value: 7
-);
+Runtime.Run(args);
 
 record CollatzOdd(
     int Start,
@@ -49,4 +44,18 @@ record CollatzWorkflow() : Workflow(
     {
         Console.WriteLine("Conjectura valida para um numero");
     })
+);
+
+record CollatzTest() : Test(
+    () =>
+    {
+        Assert<CollatzEven>(s => s.Last.Value == 22) // Alguma execução precisa ser Even com Value 22
+            .Then<CollatzOdd>() // Após um Even precisa ter um Odd, em algum momento
+            .Then<CollatzEnd>(s => s.Events.Count > 2); // garante que End foi emitido em algum momento
+     
+        Publish<CollatzOdd>.Emit(
+            Start: 7,
+            Value: 7
+        );
+    }
 );
