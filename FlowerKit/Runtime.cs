@@ -7,6 +7,7 @@ using System.Runtime.CompilerServices;
 
 namespace FlowerKit;
 
+using Core.Graph;
 using Core.Executors;
 using Core.Startup;
 
@@ -16,6 +17,12 @@ using Core.Startup;
 public static class Runtime
 {
     public static IExecutor CurrentExecutor { get; set; } = new LocalExecutor();
+
+    /// <summary>
+    /// The event graph of the application, built at startup by <see cref="Run"/>.
+    /// Used to wire the architecture (Executor, Kafka).
+    /// </summary>
+    public static FlowGraph? Graph { get; private set; }
 
     /// <summary>
     /// Publish a new event.
@@ -33,7 +40,7 @@ public static class Runtime
         ArgumentNullException.ThrowIfNull(CurrentExecutor, nameof(CurrentExecutor));
 
         var codeAnalizer = new FlowCodeAnalyzer();
-        codeAnalizer.Analize();
+        Graph = codeAnalizer.Analize();
         
         InitWorkflows();
 
@@ -57,9 +64,7 @@ public static class Runtime
             construtor.Invoke([]);
         }
     }
-
-
-
+    
     static Assembly[] GetAllAssemblies()
     {
         var head = Assembly.GetEntryAssembly();

@@ -2,172 +2,309 @@ using System;
 using System.Linq;
 using System.Collections.Generic;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace FlowerKit.Core.Startup;
 
+using Graph;
+
 /// <summary>
-/// A object to analyzer flow implementations and generate insights.
+/// Analyzes the source of the running project with the Roslyn semantic model and
+/// builds a <see cref="FlowGraph"/>: which events exist, which events trigger which
+/// flows, and which events each flow can publish. Publish calls are followed in
+/// depth through the user's own methods; third-party code (no source) is ignored.
 /// </summary>
 public class FlowCodeAnalyzer
 {
+    const string EventMetadataName = "FlowerKit.Event";
+    const string FlowMetadataName = "FlowerKit.Flow";
+    const string PublishMetadataName = "FlowerKit.Publish`1";
+
     /// <summary>
-    /// Analize the code of the current running project.
+    /// The <see cref="Flow"/> factory methods that define a flow. Adding a new one
+    /// (a new way to declare a flow) is a single entry here.
     /// </summary>
-    public virtual void Analize()
+    protected virtual IReadOnlyList<FlowAnchor> Anchors { get; } =
+    [
+        new("On", IsTrigger: true),
+        new("New", IsTrigger: false)
+    ];
+
+    /// <summary>
+    /// Analyze the code of the current running project and return its flow graph,
+    /// or null when the project cannot be compiled.
+    /// </summary>
+    public virtual FlowGraph? Analize()
     {
         var compiler = new AssemblyCompiler();
-        var trees = compiler.GetSyntaxTrees();
+        var compilation = compiler.GetCompilation();
 
-        foreach (var tree in trees)
-            AnalizeTree(tree);
-    }
+        var events = CollectEvents(compilation);
+        var flows = CollectFlows(compilation);
 
-    protected virtual void AnalizeTree(SyntaxTree tree)
-    {
-        var root = tree.GetCompilationUnitRoot();
-
-        var workflows = 
-            from node in root.DescendantNodes()
-            let info = TryParseWorkflow(node)
-            where info is not null
-            select info;
-        
-        Console.WriteLine("Project Structure:");
-        foreach (var workflow in workflows)
-        {
-            Console.WriteLine(workflow.Name);
-            foreach (var flow in workflow.Flows)
-                Console.WriteLine($"\t{flow.Method} {flow.Type} -> {string.Join(", ", flow.Calls.Select(x => $"{x.Action} {x.To}"))}");
-        }
+        var graph = new FlowGraph(events, flows);
+        PrintGraph(graph);
+        return graph;
     }
 
     /// <summary>
-    /// Check if a syntax node is a workflow definition and return info.
+    /// Collect every user-defined type that inherits from <see cref="Event"/>.
     /// </summary>
-    protected virtual WorkflowInfo? TryParseWorkflow(SyntaxNode node)
+    protected virtual IReadOnlyCollection<string> CollectEvents(Compilation compilation)
     {
-        if (node is not RecordDeclarationSyntax rec)
-            return null;
-        
-        var baseList = rec.BaseList?.ChildNodes() ?? [];
-        foreach (var baseDef in baseList)
+        var eventSymbol = compilation.GetTypeByMetadataName(EventMetadataName);
+        var events = new List<string>();
+        if (eventSymbol is null)
+            return events;
+
+        foreach (var type in GetSourceTypes(compilation.GlobalNamespace))
         {
-            if (baseDef is not PrimaryConstructorBaseTypeSyntax baseCto)
-                continue;
-            
-            var identifier = 
-                baseCto.ChildNodes()
-                .OfType<IdentifierNameSyntax>()
-                .FirstOrDefault();
-            if (identifier is null)
-                continue;
-            
-            var typeName = identifier.Identifier.Text;
-            if (typeName != nameof(Workflow))
-                continue;
-            
-            var workflowName = rec.Identifier.Text;
-            
-            var argList =
-                baseCto.ChildNodes()
-                .OfType<ArgumentListSyntax>()
-                .FirstOrDefault();
-            if (argList is null)
-                continue;
-            
-            return new WorkflowInfo(
-                workflowName,
-                [   
-                    ..from arg in argList.ChildNodes().OfType<ArgumentSyntax>()
-                    let flowInfo = TryParseFlowExpression(arg)
-                    where flowInfo is not null
-                    select flowInfo
-                ]
-            );
+            if (InheritsFrom(type, eventSymbol))
+                events.Add(type.Name);
         }
 
-        return null;
+        return events;
     }
 
     /// <summary>
-    /// Process a syntax node and try parse a flow definition call.
+    /// Find every flow definition (a call to an anchor method on <see cref="Flow"/>)
+    /// and resolve the events it may publish, in depth.
     /// </summary>
-    protected virtual FlowInfo? TryParseFlowExpression(ArgumentSyntax arg)
+    protected virtual IReadOnlyCollection<FlowNode> CollectFlows(Compilation compilation)
     {
-        if (arg.Expression is not InvocationExpressionSyntax invocation)
-            return null;
+        var flowSymbol = compilation.GetTypeByMetadataName(FlowMetadataName);
+        var publishSymbol = compilation.GetTypeByMetadataName(PublishMetadataName);
+        var nodes = new List<FlowNode>();
+        if (flowSymbol is null)
+            return nodes;
 
-        if (invocation.Expression is not MemberAccessExpressionSyntax member)
-            return null;
+        foreach (var tree in compilation.SyntaxTrees)
+        {
+            var model = compilation.GetSemanticModel(tree);
 
-        var flowMethod = member.Name.Identifier.Text;
+            var invocations = tree.GetRoot()
+                .DescendantNodes()
+                .OfType<InvocationExpressionSyntax>();
 
-        var generic = (member.Name as GenericNameSyntax)?
-            .TypeArgumentList.Arguments
-            .FirstOrDefault()?
-            .ToString();
+            foreach (var invocation in invocations)
+            {
+                var node = TryParseFlow(invocation, model, compilation, flowSymbol, publishSymbol);
+                if (node is not null)
+                    nodes.Add(node);
+            }
+        }
 
-        var lambda = invocation.ArgumentList.Arguments
-            .Select(a => a.Expression)
-            .OfType<LambdaExpressionSyntax>()
-            .FirstOrDefault();
-
-        if (lambda is null)
-            return null;
-
-        var calls = ProcessLambda(lambda);
-
-        return new FlowInfo(
-            flowMethod,
-            generic,
-            [ ..calls ]
-        );
+        return nodes;
     }
-    
-    private IEnumerable<PublishCallInfo> ProcessLambda(LambdaExpressionSyntax lambda)
+
+    /// <summary>
+    /// Try to read an invocation as a flow definition (e.g. <c>Flow.On&lt;T&gt;(...)</c>),
+    /// returning its node with the trigger event and every publishable event.
+    /// </summary>
+    protected virtual FlowNode? TryParseFlow(
+        InvocationExpressionSyntax invocation,
+        SemanticModel model,
+        Compilation compilation,
+        INamedTypeSymbol flowSymbol,
+        INamedTypeSymbol? publishSymbol
+    )
     {
-        var invokations = lambda.DescendantNodes()
+        if (model.GetSymbolInfo(invocation).Symbol is not IMethodSymbol method)
+            return null;
+
+        if (!SymbolEqualityComparer.Default.Equals(method.ContainingType, flowSymbol))
+            return null;
+
+        var anchor = Anchors.FirstOrDefault(a => a.Method == method.Name);
+        if (anchor is null)
+            return null;
+
+        string? trigger = null;
+        if (anchor.IsTrigger && method.TypeArguments.Length > 0)
+            trigger = method.TypeArguments[0].Name;
+
+        var publishes = new HashSet<PublishEdge>();
+        var delegateArg = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
+        if (delegateArg is not null)
+        {
+            var visited = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
+            CollectFromDelegate(delegateArg, model, compilation, publishSymbol, publishes, visited);
+        }
+
+        return new FlowNode(anchor, trigger, [.. publishes]);
+    }
+
+    /// <summary>
+    /// Start the depth-first publish search from the delegate passed to an anchor:
+    /// a lambda body, or a referenced method / local function (method group).
+    /// </summary>
+    protected virtual void CollectFromDelegate(
+        ExpressionSyntax delegateArg,
+        SemanticModel model,
+        Compilation compilation,
+        INamedTypeSymbol? publishSymbol,
+        HashSet<PublishEdge> publishes,
+        HashSet<ISymbol> visited
+    )
+    {
+        if (delegateArg is LambdaExpressionSyntax lambda && lambda.Body is not null)
+        {
+            CollectFromBody(lambda.Body, compilation, publishSymbol, publishes, visited);
+            return;
+        }
+
+        if (model.GetSymbolInfo(delegateArg).Symbol is IMethodSymbol method)
+            CollectFromMethod(method, compilation, publishSymbol, publishes, visited);
+    }
+
+    /// <summary>
+    /// Walk every invocation inside a body: record <c>Publish&lt;X&gt;.Action(...)</c>
+    /// calls, and recurse into calls to the user's own methods.
+    /// </summary>
+    protected virtual void CollectFromBody(
+        SyntaxNode body,
+        Compilation compilation,
+        INamedTypeSymbol? publishSymbol,
+        HashSet<PublishEdge> publishes,
+        HashSet<ISymbol> visited
+    )
+    {
+        var model = compilation.GetSemanticModel(body.SyntaxTree);
+
+        var invocations = body.DescendantNodesAndSelf()
             .OfType<InvocationExpressionSyntax>();
-        
-        foreach (var invoke in invokations)
+
+        foreach (var invocation in invocations)
         {
-            var invokeData = ProcessInvocation(invoke);
-            if (invokeData is not null)
-                yield return invokeData;
+            if (TryParsePublish(invocation, model, publishSymbol, out var edge))
+            {
+                publishes.Add(edge);
+                continue;
+            }
+
+            if (model.GetSymbolInfo(invocation).Symbol is IMethodSymbol callee)
+                CollectFromMethod(callee, compilation, publishSymbol, publishes, visited);
         }
     }
 
-    private PublishCallInfo? ProcessInvocation(InvocationExpressionSyntax invocation)
+    /// <summary>
+    /// Recurse into a user-defined method's body. Methods without source (third
+    /// party) are ignored, and a visited set breaks recursion cycles.
+    /// </summary>
+    protected virtual void CollectFromMethod(
+        IMethodSymbol method,
+        Compilation compilation,
+        INamedTypeSymbol? publishSymbol,
+        HashSet<PublishEdge> publishes,
+        HashSet<ISymbol> visited
+    )
     {
+        var definition = method.OriginalDefinition;
+        if (definition.DeclaringSyntaxReferences.Length == 0)
+            return;
+
+        if (!visited.Add(definition))
+            return;
+
+        foreach (var reference in definition.DeclaringSyntaxReferences)
+        {
+            var body = GetBody(reference.GetSyntax());
+            if (body is not null)
+                CollectFromBody(body, compilation, publishSymbol, publishes, visited);
+        }
+    }
+
+    /// <summary>
+    /// Try to read an invocation as <c>Publish&lt;X&gt;.Action(...)</c>. It matches on
+    /// the receiver being the <see cref="Publish{T}"/> type, so it works even though
+    /// the publish member is <c>dynamic</c>, and captures the member name as the action.
+    /// </summary>
+    protected virtual bool TryParsePublish(
+        InvocationExpressionSyntax invocation,
+        SemanticModel model,
+        INamedTypeSymbol? publishSymbol,
+        out PublishEdge edge
+    )
+    {
+        edge = default;
+        if (publishSymbol is null)
+            return false;
+
         if (invocation.Expression is not MemberAccessExpressionSyntax member)
-            return null;
+            return false;
 
-        if (member.Expression is not GenericNameSyntax generic)
-            return null;
+        if (model.GetSymbolInfo(member.Expression).Symbol is not INamedTypeSymbol receiver)
+            return false;
 
-        if (generic.Identifier.Text != nameof(Publish<>))
-            return null;
+        if (!SymbolEqualityComparer.Default.Equals(receiver.OriginalDefinition, publishSymbol))
+            return false;
 
-        var target =
-            generic.TypeArgumentList.Arguments
-                .Single().ToString();
-
+        var eventType = receiver.TypeArguments.Length > 0
+            ? receiver.TypeArguments[0].Name
+            : "?";
         var action = member.Name.Identifier.Text;
 
-        return new (action, target);
+        edge = new PublishEdge(eventType, action);
+        return true;
     }
 
-    static void PrintNode(SyntaxNode node, int level = 0)
+    /// <summary>
+    /// Gets the executable body of a method or local function declaration.
+    /// </summary>
+    protected static SyntaxNode? GetBody(SyntaxNode declaration) => declaration switch
     {
-        Console.WriteLine($"{new string(' ', level * 2)}{node.Kind()}");
+        MethodDeclarationSyntax m => (SyntaxNode?)m.Body ?? m.ExpressionBody?.Expression,
+        LocalFunctionStatementSyntax l => (SyntaxNode?)l.Body ?? l.ExpressionBody?.Expression,
+        _ => null
+    };
 
-        foreach (var child in node.ChildNodes())
-            PrintNode(child, level + 1);
+    /// <summary>
+    /// Enumerates all types declared in source under a namespace.
+    /// </summary>
+    protected static IEnumerable<INamedTypeSymbol> GetSourceTypes(INamespaceSymbol ns)
+    {
+        foreach (var type in ns.GetTypeMembers())
+        {
+            if (type.Locations.Any(l => l.IsInSource))
+                yield return type;
+
+            foreach (var nested in type.GetTypeMembers())
+                if (nested.Locations.Any(l => l.IsInSource))
+                    yield return nested;
+        }
+
+        foreach (var child in ns.GetNamespaceMembers())
+            foreach (var type in GetSourceTypes(child))
+                yield return type;
     }
 
-    public record WorkflowInfo(string Name, FlowInfo[] Flows);
-    public record FlowInfo(string Method, string? Type, PublishCallInfo[] Calls);
-    public record PublishCallInfo(string Action, string To);
+    /// <summary>
+    /// Whether <paramref name="type"/> derives from <paramref name="baseType"/>.
+    /// </summary>
+    protected static bool InheritsFrom(INamedTypeSymbol type, INamedTypeSymbol baseType)
+    {
+        for (var current = type.BaseType; current is not null; current = current.BaseType)
+            if (SymbolEqualityComparer.Default.Equals(current, baseType))
+                return true;
+
+        return false;
+    }
+
+    /// <summary>
+    /// Prints the graph for inspection.
+    /// </summary>
+    protected virtual void PrintGraph(FlowGraph graph)
+    {
+        Console.WriteLine("FlowGraph:");
+        Console.WriteLine($"  Events: {string.Join(", ", graph.Events)}");
+
+        foreach (var flow in graph.Flows)
+        {
+            var trigger = flow.TriggerEvent ?? "(no trigger)";
+            var publishes = flow.Publishes.Count == 0
+                ? "-"
+                : string.Join(", ", flow.Publishes);
+            Console.WriteLine($"  [{flow.Anchor.Method}] {trigger} -> {publishes}");
+        }
+    }
 }

@@ -68,6 +68,8 @@ public class AssemblyCompiler
             .Append(assembly)
             .Append(Assembly.Load("System.Linq.Expressions"))
             .Append(Assembly.Load("System.Private.CoreLib"))
+            // Required so code that uses 'dynamic' (e.g. Publish<T>.Emit) can be emitted.
+            .Append(Assembly.Load("Microsoft.CSharp"))
             .Concat(extraRefs);
         
         return
@@ -83,26 +85,59 @@ public class AssemblyCompiler
         var syntaxTrees = files
             .Select(File.ReadAllText)
             .Select(text => CSharpSyntaxTree.ParseText(text));
-        
+
         return syntaxTrees;
+    }
+
+    /// <summary>
+    /// The SDK implicit global usings. MSBuild generates these into 'obj' when
+    /// 'ImplicitUsings' is enabled, but we compile the raw source and skip 'obj',
+    /// so we synthesize them to bind user code that relies on them (e.g. Console).
+    /// System.Net.Http is intentionally omitted: it is a separate assembly that is
+    /// not always referenced at runtime, and an unresolved using would turn into a
+    /// compilation error that breaks the emit path.
+    /// </summary>
+    protected virtual SyntaxTree GetImplicitUsingsTree()
+    {
+        const string implicitUsings = """
+            global using global::System;
+            global using global::System.Collections.Generic;
+            global using global::System.IO;
+            global using global::System.Linq;
+            global using global::System.Threading;
+            global using global::System.Threading.Tasks;
+            """;
+
+        return CSharpSyntaxTree.ParseText(implicitUsings);
+    }
+
+    /// <summary>
+    /// Build a compilation from files in 'MainDirectory'. The same compilation is
+    /// reused both to emit an assembly (HotReload) and to run semantic analysis,
+    /// so syntax trees and semantic models stay consistent.
+    /// </summary>
+    public virtual CSharpCompilation GetCompilation()
+    {
+        var syntaxTrees = GetSyntaxTrees(MainDirectory)
+            .Prepend(GetImplicitUsingsTree());
+
+        var compilationOptions = new CSharpCompilationOptions(
+            OutputKind.ConsoleApplication
+        );
+
+        return CSharpCompilation.Create(
+            "HotReloadAppend",
+            syntaxTrees: syntaxTrees,
+            references: GetReferences(ExtraReferences),
+            options: compilationOptions
+        );
     }
 
     protected virtual Assembly? GetNewAssembly(
         string directory,
         IEnumerable<Assembly> extraRefs)
     {
-        var syntaxTrees = GetSyntaxTrees(directory);
-
-        var compilationOptions = new CSharpCompilationOptions(
-            OutputKind.ConsoleApplication
-        );
-        
-        var compilation = CSharpCompilation.Create(
-            "HotReloadAppend",
-            syntaxTrees: syntaxTrees,
-            references: GetReferences(extraRefs),
-            options: compilationOptions
-        );
+        var compilation = GetCompilation();
 
         using var ms = new MemoryStream();
         var result = compilation.Emit(ms);
@@ -112,12 +147,12 @@ public class AssemblyCompiler
             ms.Seek(0, SeekOrigin.Begin);
             return Assembly.Load(ms.ToArray());
         }
-        
+
         foreach (var diagnostic in result.Diagnostics)
         {
             // TODO: Show errors
         }
-        
+
         return null;
     }
 }

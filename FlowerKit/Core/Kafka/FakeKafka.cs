@@ -22,7 +22,7 @@ public sealed class FakeKafka
     /// <summary>
     /// The names of every topic that currently exists.
     /// </summary>
-    public IReadOnlyCollection<string> Topics => [.. topics.Keys];
+    public IReadOnlyCollection<string> Topics => [ ..topics.Keys ];
 
     /// <summary>
     /// Creates a topic with an explicit partition count. Idempotent by name: if
