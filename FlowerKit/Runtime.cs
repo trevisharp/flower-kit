@@ -1,12 +1,16 @@
 using System;
 using System.Linq;
+using System.Threading;
 using System.Reflection;
 using System.Diagnostics;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 
+using Microsoft.CodeAnalysis;
+
 namespace FlowerKit;
 
+using Core;
 using Core.Graph;
 using Core.Executors;
 using Core.Startup;
@@ -72,6 +76,19 @@ public static class Runtime
     static void ResetEmittedTestEvents()
         => emittedTestEvents.Clear();
 
+    static bool watchRequested;
+
+    /// <summary>
+    /// Whether <see cref="Run"/> should block watching source files for changes
+    /// and hot-reloading. <see cref="Environments.Development"/> always watches;
+    /// <see cref="Environments.Test"/> and <see cref="Environments.Staging"/> only
+    /// watch when the <c>watch</c> arg was passed; <see cref="Environments.Production"/>
+    /// never watches, even with the arg.
+    /// </summary>
+    static bool ShouldWatch =>
+        Environment == Environments.Development
+        || (watchRequested && Environment != Environments.Production);
+
     /// <summary>
     /// Start application.
     /// </summary>
@@ -86,12 +103,15 @@ public static class Runtime
         if (Environment != Environments.Production)
             GenerateGraph();
 
-        InitWorkflows();
+        InitWorkflows(GetlAllTypes());
 
         CurrentExecutor.Run();
 
         if (Environment == Environments.Test)
-            InitTests();
+            InitTests(GetlAllTypes());
+
+        if (ShouldWatch)
+            RunWatchLoop();
     }
 
     static void ApplyConfigs(string[] args)
@@ -102,13 +122,21 @@ public static class Runtime
 
     static void ApplyConfig(string arg)
     {
-        Environment = arg switch
+        switch (arg)
         {
-            "test" => Environments.Test,
-            "stag" => Environments.Staging,
-            "prod" => Environments.Production,
-            _ => Environment
-        };
+            case "test":
+                Environment = Environments.Test;
+                break;
+            case "stag":
+                Environment = Environments.Staging;
+                break;
+            case "prod":
+                Environment = Environments.Production;
+                break;
+            case "watch":
+                watchRequested = true;
+                break;
+        }
     }
 
     static void GenerateGraph()
@@ -117,10 +145,56 @@ public static class Runtime
         Graph = codeAnalizer.Analize();
     }
 
-    static void InitWorkflows()
+    /// <summary>
+    /// Blocks, watching the user project's source files for changes. On every
+    /// change, <see cref="Reload"/> recompiles the project and rebuilds the
+    /// whole runtime (graph, workflows, executor, and, in
+    /// <see cref="Environments.Test"/>, the tests) from scratch.
+    /// </summary>
+    static void RunWatchLoop()
+    {
+        var reloader = Reloader.GetDefault();
+        reloader.OnReload += Reload;
+
+        while (true)
+        {
+            Thread.Sleep(200);
+            reloader.TryReload();
+        }
+    }
+
+    /// <summary>
+    /// Rebuilds the whole runtime from a freshly recompiled generation of the
+    /// user project: stops the current executor, discards the previous flows,
+    /// re-analyzes the graph, re-instantiates workflows (and, in
+    /// <see cref="Environments.Test"/>, tests) from the new assembly, and starts
+    /// a fresh executor instance. In-flight broker state is intentionally
+    /// discarded; a flow from the old generation is never mixed with an event
+    /// from the new one.
+    /// </summary>
+    static void Reload(Assembly assembly, Compilation compilation)
+    {
+        CurrentExecutor.Stop();
+        Planner.Current.Reset();
+
+        Graph = new FlowCodeAnalyzer().Analize(compilation);
+
+        var newTypes = GetLoadableTypes(assembly).ToArray();
+        InitWorkflows(newTypes);
+
+        CurrentExecutor = (IExecutor)Activator.CreateInstance(CurrentExecutor.GetType())!;
+        CurrentExecutor.Run();
+
+        if (Environment == Environments.Test)
+            InitTests(newTypes);
+
+        Console.WriteLine($"Reloaded at {DateTime.Now:HH:mm:ss}");
+    }
+
+    static void InitWorkflows(IEnumerable<Type> types)
     {
         var workflowTypes =
-            from type in GetlAllTypes()
+            from type in types
             where type.IsClass
             where type.BaseType == typeof(Workflow)
             select type;
@@ -141,10 +215,10 @@ public static class Runtime
         Workflows = workflows;
     }
 
-    static void InitTests()
+    static void InitTests(IEnumerable<Type> types)
     {
         var testTypes =
-            from type in GetlAllTypes()
+            from type in types
             where type.IsClass
             where type.BaseType == typeof(Test)
             select type;
@@ -162,7 +236,7 @@ public static class Runtime
             TestRunner.RunTest(test);
         }
     }
-    
+
     static IEnumerable<Type> GetlAllTypes()
         => GetAllAssemblies().SelectMany(GetLoadableTypes);
 

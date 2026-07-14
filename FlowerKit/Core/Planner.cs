@@ -18,9 +18,16 @@ public class Planner
     {
         ArgumentNullException.ThrowIfNull(flow, nameof(flow));
         ArgumentNullException.ThrowIfNull(eventType, nameof(eventType));
-        
+
         PlannedFlows.Add(new(flow, eventType));
     }
+
+    /// <summary>
+    /// Clears every planned flow. Used by HotReload to discard the previous
+    /// generation's flows before the recompiled workflows re-register theirs.
+    /// </summary>
+    public void Reset()
+        => PlannedFlows.Clear();
 
     public record PlanedFlow(
         Flow Flow,

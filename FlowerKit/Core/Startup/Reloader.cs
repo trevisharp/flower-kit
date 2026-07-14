@@ -1,6 +1,7 @@
 using System;
 using System.Reflection;
 using System.Collections.Generic;
+using Microsoft.CodeAnalysis.CSharp;
 
 namespace FlowerKit.Core.Startup;
 
@@ -30,7 +31,12 @@ public class Reloader
         };
     }
 
-    public event Action<Assembly>? OnReload;
+    /// <summary>
+    /// Raised with the freshly emitted assembly and the compilation that produced
+    /// it, so a subscriber (e.g. <see cref="Runtime"/>) can reuse the compilation
+    /// for semantic analysis instead of parsing the source a second time.
+    /// </summary>
+    public event Action<Assembly, CSharpCompilation>? OnReload;
 
     /// <summary>
     /// Try Reload code calling OnReload on success operation.
@@ -43,29 +49,19 @@ public class Reloader
             return;
         if (Compiler is null)
             return;
-        
+
         var verify = Watcher.Verify();
         if (!verify)
             return;
-        
-        foreach (var action in Actions)
-        {
-            if (action is null)
-                continue;
-            
-            action();
-        }
-        
-        var newAssembly = Compiler.Get();
-        if (newAssembly is null)
-            return;
-        
-        if (OnReload is not null)
-            OnReload(newAssembly);
+
+        Reload();
     }
 
     /// <summary>
-    /// Force Reload wihtout verification.
+    /// Force Reload wihtout verification. On a compilation error, the
+    /// diagnostics are printed by <see cref="AssemblyCompiler.Emit"/> and
+    /// <see cref="OnReload"/> is not raised, leaving the previous generation
+    /// running.
     /// </summary>
     public void Reload()
     {
@@ -73,15 +69,15 @@ public class Reloader
         {
             if (action is null)
                 continue;
-            
+
             action();
         }
-        
-        var newAssembly = Compiler.Get();
+
+        var compilation = Compiler.GetCompilation();
+        var newAssembly = Compiler.Emit(compilation);
         if (newAssembly is null)
             return;
-        
-        if (OnReload is not null)
-            OnReload(newAssembly);
+
+        OnReload?.Invoke(newAssembly, compilation);
     }
 }

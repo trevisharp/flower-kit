@@ -39,7 +39,16 @@ public class FlowCodeAnalyzer
     {
         var compiler = new AssemblyCompiler();
         var compilation = compiler.GetCompilation();
+        return Analize(compilation);
+    }
 
+    /// <summary>
+    /// Analyze an already-built compilation and return its flow graph. Used on
+    /// HotReload to reuse the compilation that was also used to emit the new
+    /// assembly, instead of parsing the source a second time.
+    /// </summary>
+    public virtual FlowGraph? Analize(Compilation compilation)
+    {
         var events = CollectEvents(compilation);
         var workflows = CollectWorkflows(compilation);
         var flows = CollectFlows(compilation);

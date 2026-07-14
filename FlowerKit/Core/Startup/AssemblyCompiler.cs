@@ -21,13 +21,7 @@ public class AssemblyCompiler
     /// Get a new assembly of compilation from files in 'MainDirectory'
     /// </summary>
     public virtual Assembly? Get()
-    {
-        var newAssembly = GetNewAssembly(
-            MainDirectory,
-            ExtraReferences
-        );
-        return newAssembly;
-    }
+        => Emit(GetCompilation());
 
     /// <summary>
     /// Get the syntax tree from files in 'MainDirectory'
@@ -40,6 +34,9 @@ public class AssemblyCompiler
         return syntaxTrees;
     }
 
+    /// <summary>
+    /// Get all .cs files in a directory and recursively.
+    /// </summary>
     protected virtual IEnumerable<string> FindAllCSharpFiles(string directory)
     {
         var files = Directory.GetFiles(
@@ -58,7 +55,7 @@ public class AssemblyCompiler
         foreach (var file in codeFiles.Distinct())
             yield return file;
     }
-
+    
     protected virtual IEnumerable<MetadataReference> GetReferences(IEnumerable<Assembly> extraRefs)
     {
         var assembly = Assembly.GetEntryAssembly();
@@ -78,6 +75,9 @@ public class AssemblyCompiler
             select MetadataReference.CreateFromFile(loc);
     }
 
+    /// <summary>
+    /// Get a collection of syntax tree from cs files from a directory.
+    /// </summary>
     public virtual IEnumerable<SyntaxTree> GetSyntaxTrees(string directory)
     {
         var files = FindAllCSharpFiles(directory);
@@ -133,12 +133,13 @@ public class AssemblyCompiler
         );
     }
 
-    protected virtual Assembly? GetNewAssembly(
-        string directory,
-        IEnumerable<Assembly> extraRefs)
+    /// <summary>
+    /// Emits an assembly from an existing compilation (e.g. one already used for
+    /// semantic analysis, so the source isn't parsed twice). On failure, prints
+    /// the compilation's error diagnostics and returns null.
+    /// </summary>
+    public virtual Assembly? Emit(CSharpCompilation compilation)
     {
-        var compilation = GetCompilation();
-
         using var ms = new MemoryStream();
         var result = compilation.Emit(ms);
 
@@ -150,7 +151,8 @@ public class AssemblyCompiler
 
         foreach (var diagnostic in result.Diagnostics)
         {
-            // TODO: Show errors
+            if (diagnostic.Severity == DiagnosticSeverity.Error)
+                Console.Error.WriteLine(diagnostic.ToString());
         }
 
         return null;

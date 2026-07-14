@@ -14,4 +14,10 @@ public interface IExecutor
     /// Run the executor engine.
     /// </summary>
     void Run();
+
+    /// <summary>
+    /// Stop the executor engine, releasing any background resources (e.g.
+    /// consumer threads). Used by HotReload before a new generation takes over.
+    /// </summary>
+    void Stop();
 }

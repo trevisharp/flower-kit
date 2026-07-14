@@ -42,7 +42,7 @@ record CollatzWorkflow() : Workflow(
 
     Flow.On<CollatzEnd>(ctx =>
     {
-        Console.WriteLine("Conjectura valida para um numero");
+        Console.WriteLine("Conjectura valida para um numero!");
     })
 );
 
@@ -54,8 +54,8 @@ record CollatzTest() : Test(
             .Then<CollatzEnd>(s => s.Events.Count > 2); // garante que End foi emitido em algum momento
      
         Publish<CollatzOdd>.Emit(
-            Start: 7,
-            Value: 7
+            Start: 9,
+            Value: 9
         );
     }
 );

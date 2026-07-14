@@ -96,8 +96,13 @@ public class FileWatcher
         void onChange(object sender, FileSystemEventArgs e)
             => lastTimeUpdate = DateTime.Now;
 
+        // Many editors (and this tool's own file writes) save atomically: write
+        // to a temp file, then rename it over the original. That raises a
+        // Renamed event, not Changed/Created, so it must be watched too or
+        // saves from a real editor would go undetected.
         watcher.Created += onChange;
         watcher.Changed += onChange;
+        watcher.Renamed += onChange;
         watcher.EnableRaisingEvents = true;
     }
 }

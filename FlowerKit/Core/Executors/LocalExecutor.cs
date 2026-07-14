@@ -25,9 +25,11 @@ public class LocalExecutor : IExecutor
     readonly Dictionary<string, Consumer> consumersByWorkflow = [];
     readonly Dictionary<(string Workflow, string EventType), List<Flow>> flowsByKey = [];
     readonly Dictionary<string, HashSet<string>> topicsByEventType = [];
+    readonly List<Thread> pumpThreads = [];
 
     Producer? producer;
     bool draining;
+    volatile bool running = true;
 
     public void Run()
     {
@@ -57,6 +59,20 @@ public class LocalExecutor : IExecutor
 
         if (Runtime.Environment != Environments.Test)
             StartBackgroundPumps();
+    }
+
+    /// <summary>
+    /// Stops every background pump thread and waits for them to exit, so a
+    /// flow from the previous HotReload generation cannot run concurrently with
+    /// the new one.
+    /// </summary>
+    public void Stop()
+    {
+        running = false;
+        foreach (var thread in pumpThreads)
+            thread.Join(TimeSpan.FromSeconds(1));
+
+        pumpThreads.Clear();
     }
 
     public void Publish(object ev)
@@ -146,13 +162,14 @@ public class LocalExecutor : IExecutor
                 IsBackground = true,
                 Name = $"flowerkit-{workflow}"
             };
+            pumpThreads.Add(thread);
             thread.Start();
         }
     }
 
     void PumpLoop(string workflow, Consumer consumer)
     {
-        while (true)
+        while (running)
         {
             var batch = consumer.Poll();
             if (batch.Count == 0)
