@@ -2,6 +2,8 @@ using System;
 using System.Threading;
 using System.Collections.Generic;
 
+using Microsoft.Extensions.DependencyInjection;
+
 namespace FlowerKit.Core.Executors;
 
 using Kafka;
@@ -25,6 +27,7 @@ public class LocalExecutor : IExecutor
     readonly Dictionary<string, Consumer> consumersByWorkflow = [];
     readonly Dictionary<(string Workflow, string EventType), List<Flow>> flowsByKey = [];
     readonly Dictionary<string, HashSet<string>> topicsByEventType = [];
+    readonly Dictionary<string, Type> workflowTypeByName = [];
     readonly List<Thread> pumpThreads = [];
 
     Producer? producer;
@@ -95,8 +98,11 @@ public class LocalExecutor : IExecutor
     {
         var ownerByFlow = new Dictionary<Flow, string>();
         foreach (var (name, workflow) in Runtime.Workflows)
+        {
+            workflowTypeByName[name] = workflow.GetType();
             foreach (var flow in workflow.Flows)
                 ownerByFlow[flow] = name;
+        }
 
         foreach (var planned in Planner.Current.PlannedFlows)
         {
@@ -184,13 +190,44 @@ public class LocalExecutor : IExecutor
         }
     }
 
+    /// <summary>
+    /// Dispatches a consumed message to the flows that should react to it.
+    /// Standalone flows (no enclosing workflow, so no constructor to inject
+    /// into) run the single planned instance directly, as before. A real
+    /// workflow instead gets a fresh instance per consumed event, built inside
+    /// its own DI scope: scoped services registered on <see cref="Runtime.Services"/>
+    /// live exactly as long as this dispatch, and are released when the scope
+    /// is disposed at the end of this method.
+    /// </summary>
     void Dispatch(string workflow, object ev)
     {
-        var key = (workflow, ev.GetType().Name);
-        if (!flowsByKey.TryGetValue(key, out var flows))
+        var eventTypeName = ev.GetType().Name;
+
+        if (workflow == StandaloneWorkflow)
+        {
+            if (flowsByKey.TryGetValue((workflow, eventTypeName), out var flows))
+                foreach (var flow in flows)
+                    flow.Run(ev);
+            return;
+        }
+
+        if (!workflowTypeByName.TryGetValue(workflow, out var type))
             return;
 
-        foreach (var flow in flows)
-            flow.Run(ev);
+        using var scope = Runtime.Provider.CreateScope();
+        Workflow instance;
+        try
+        {
+            instance = (Workflow)ActivatorUtilities.CreateInstance(scope.ServiceProvider, type);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Could not instantiate workflow '{workflow}' to dispatch '{eventTypeName}': {ex.Message}");
+            return;
+        }
+
+        foreach (var flow in instance.Flows)
+            if (flow.EventType.Name == eventTypeName)
+                flow.Run(ev);
     }
 }

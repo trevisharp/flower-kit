@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 
 using Microsoft.CodeAnalysis;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace FlowerKit;
 
@@ -24,6 +25,20 @@ public static class Runtime
     public static IExecutor CurrentExecutor { get; set; } = new LocalExecutor();
 
     public static TestRunner TestRunner { get; set; } = new TestRunner();
+
+    /// <summary>
+    /// The container of services available for injection into Workflow and Test
+    /// constructors. Register services here (e.g. <c>Runtime.Services.AddScoped
+    /// &lt;IFoo, Foo&gt;()</c>) before calling <see cref="Run"/>.
+    /// </summary>
+    public static IServiceCollection Services { get; set; } = new ServiceCollection();
+
+    /// <summary>
+    /// The built provider for <see cref="Services"/>. A scope is created per
+    /// consumed event (see <see cref="LocalExecutor"/>), so a
+    /// scoped service lives exactly as long as the flow(s) it was resolved for.
+    /// </summary>
+    public static IServiceProvider Provider { get; private set; } = null!;
 
     /// <summary>
     /// The event graph of the application, built at startup by <see cref="Run"/>.
@@ -100,12 +115,15 @@ public static class Runtime
 
         ApplyConfigs(args ?? []);
 
+        Provider = Services.BuildServiceProvider();
+
         if (Environment != Environments.Production)
             GenerateGraph();
 
         InitWorkflows(GetlAllTypes());
 
         CurrentExecutor.Run();
+        Planner.Current.Freeze();
 
         if (Environment == Environments.Test)
             InitTests(GetlAllTypes());
@@ -122,21 +140,16 @@ public static class Runtime
 
     static void ApplyConfig(string arg)
     {
-        switch (arg)
+        Environment = arg switch
         {
-            case "test":
-                Environment = Environments.Test;
-                break;
-            case "stag":
-                Environment = Environments.Staging;
-                break;
-            case "prod":
-                Environment = Environments.Production;
-                break;
-            case "watch":
-                watchRequested = true;
-                break;
-        }
+            "test" => Environments.Test,
+            "stag" => Environments.Staging,
+            "prod" => Environments.Production,
+            _      => Environment
+        };
+
+        if (arg is "watch")
+            watchRequested = true;
     }
 
     static void GenerateGraph()
@@ -162,7 +175,7 @@ public static class Runtime
             reloader.TryReload();
         }
     }
-
+    
     /// <summary>
     /// Rebuilds the whole runtime from a freshly recompiled generation of the
     /// user project: stops the current executor, discards the previous flows,
@@ -178,6 +191,7 @@ public static class Runtime
 
         CurrentExecutor.Stop();
         Planner.Current.Reset();
+        RebindServices(assembly);
 
         Graph = new FlowCodeAnalyzer().Analize(compilation);
 
@@ -186,11 +200,53 @@ public static class Runtime
 
         CurrentExecutor = (IExecutor)Activator.CreateInstance(CurrentExecutor.GetType())!;
         CurrentExecutor.Run();
+        Planner.Current.Freeze();
 
         if (Environment == Environments.Test)
             InitTests(newTypes);
 
         Log.Info($"Reloaded at {DateTime.Now:HH:mm:ss}");
+    }
+
+    /// <summary>
+    /// Swaps every by-type <see cref="ServiceDescriptor"/> in <see cref="Services"/>
+    /// to the matching type in the freshly compiled assembly (same full name), then
+    /// rebuilds <see cref="Provider"/>. Needed because a type from the previous
+    /// generation is a different <see cref="Type"/> identity than its namesake in
+    /// the new one, even though the source is unchanged; a stale registration would
+    /// make DI construct the old generation's type into the new one's flows.
+    /// Descriptors registered by factory or instance (not by type) are left as-is:
+    /// rebinding what they capture is out of scope for HotReload.
+    /// </summary>
+    static void RebindServices(Assembly newAssembly)
+    {
+        IServiceCollection rebound = new ServiceCollection();
+        foreach (var descriptor in Services)
+        {
+            if (descriptor.ImplementationType is null)
+            {
+                rebound.Add(descriptor);
+                continue;
+            }
+
+            var serviceType = RebindType(descriptor.ServiceType, newAssembly);
+            var implementationType = RebindType(descriptor.ImplementationType, newAssembly);
+
+            rebound.Add(new ServiceDescriptor(serviceType, implementationType, descriptor.Lifetime));
+        }
+
+        Services = rebound;
+
+        (Provider as IDisposable)?.Dispose();
+        Provider = Services.BuildServiceProvider();
+    }
+
+    static Type RebindType(Type type, Assembly newAssembly)
+    {
+        if (type.FullName is null)
+            return type;
+
+        return newAssembly.GetType(type.FullName) ?? type;
     }
 
     static void InitWorkflows(IEnumerable<Type> types)
@@ -204,12 +260,17 @@ public static class Runtime
         var workflows = new Dictionary<string, Workflow>();
         foreach (var type in workflowTypes)
         {
-            var constructor = type.GetConstructor([]);
-            if (constructor is null)
+            using var scope = Provider.CreateScope();
+            Workflow workflow;
+            try
+            {
+                workflow = (Workflow)ActivatorUtilities.CreateInstance(scope.ServiceProvider, type);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Could not instantiate workflow '{type.Name}': {ex.Message}");
                 continue;
-
-            if (constructor.Invoke([]) is not Workflow workflow)
-                continue;
+            }
 
             workflows[type.Name] = workflow;
         }
@@ -227,12 +288,17 @@ public static class Runtime
 
         foreach (var type in testTypes)
         {
-            var constructor = type.GetConstructor([]);
-            if (constructor is null)
+            using var scope = Provider.CreateScope();
+            Test test;
+            try
+            {
+                test = (Test)ActivatorUtilities.CreateInstance(scope.ServiceProvider, type);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Could not instantiate test '{type.Name}': {ex.Message}");
                 continue;
-
-            if (constructor.Invoke([]) is not Test test)
-                continue;
+            }
 
             ResetEmittedTestEvents();
             TestRunner.RunTest(test);

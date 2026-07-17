@@ -32,6 +32,9 @@ public class TestRunner
         var type = test.GetType();
         var emitted = Runtime.EmittedTestEvents;
         var passed = true;
+        var successCount = chains.Count;
+
+        Log.Info($"Running {type.Name} tests...");
 
         foreach (var chain in chains)
         {
@@ -40,11 +43,13 @@ public class TestRunner
                 continue;
 
             passed = false;
-            Log.Error($"FAIL {type.Name}: {reason}");
+            successCount--;
+            Log.Error($"FAIL: {type.Name}: {reason}");
         }
 
         if (passed)
-            Log.Info($"PASS {type.Name}");
+            Log.Info($"Test {type.Name} pass.");
+        else Log.Info($"Success rate: {successCount} / {chains.Count}");
 
         return passed;
     }

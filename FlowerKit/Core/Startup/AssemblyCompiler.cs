@@ -6,6 +6,7 @@ using System.Collections.Generic;
 
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace FlowerKit.Core.Startup;
 
@@ -67,8 +68,13 @@ public class AssemblyCompiler
             .Append(Assembly.Load("System.Private.CoreLib"))
             // Required so code that uses 'dynamic' (e.g. Publish<T>.Emit) can be emitted.
             .Append(Assembly.Load("Microsoft.CSharp"))
-            .Concat(extraRefs);
-        
+            // Required so user code that calls Runtime.Services.AddScoped<...>() etc.
+            // (Microsoft.Extensions.DependencyInjection) can be emitted.
+            .Append(typeof(IServiceCollection).Assembly)
+            .Append(typeof(ServiceCollection).Assembly)
+            .Concat(extraRefs)
+            .DistinctBy(a => a.Location);
+
         return
             from a in assemblies
             select a.Location into loc
