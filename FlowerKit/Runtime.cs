@@ -174,7 +174,7 @@ public static class Runtime
     /// </summary>
     static void Reload(Assembly assembly, Compilation compilation)
     {
-        Console.WriteLine($"Reloading code...");
+        Log.Info($"Reloading code...");
 
         CurrentExecutor.Stop();
         Planner.Current.Reset();
@@ -190,7 +190,7 @@ public static class Runtime
         if (Environment == Environments.Test)
             InitTests(newTypes);
 
-        Console.WriteLine($"Reloaded at {DateTime.Now:HH:mm:ss}");
+        Log.Info($"Reloaded at {DateTime.Now:HH:mm:ss}");
     }
 
     static void InitWorkflows(IEnumerable<Type> types)

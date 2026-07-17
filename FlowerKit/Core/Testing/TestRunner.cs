@@ -40,11 +40,11 @@ public class TestRunner
                 continue;
 
             passed = false;
-            Console.WriteLine($"FAIL {type.Name}: {reason}");
+            Log.Error($"FAIL {type.Name}: {reason}");
         }
 
         if (passed)
-            Console.WriteLine($"PASS {type.Name}");
+            Log.Info($"PASS {type.Name}");
 
         return passed;
     }

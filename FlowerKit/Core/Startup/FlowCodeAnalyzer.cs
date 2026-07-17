@@ -356,9 +356,9 @@ public class FlowCodeAnalyzer
     /// </summary>
     protected virtual void PrintGraph(FlowGraph graph)
     {
-        Console.WriteLine("FlowGraph:");
-        Console.WriteLine($"  Events: {string.Join(", ", graph.Events)}");
-        Console.WriteLine($"  Workflows: {string.Join(", ", graph.Workflows)}");
+        Log.Debug("FlowGraph:");
+        Log.Debug($"  Events: {string.Join(", ", graph.Events)}");
+        Log.Debug($"  Workflows: {string.Join(", ", graph.Workflows)}");
 
         foreach (var flow in graph.Flows)
         {
@@ -367,7 +367,7 @@ public class FlowCodeAnalyzer
                 ? "-"
                 : string.Join(", ", flow.Publishes);
             var workflow = flow.Workflow ?? "(standalone)";
-            Console.WriteLine($"  [{workflow}] [{flow.Anchor.Method}] {trigger} -> {publishes}");
+            Log.Debug($"  [{workflow}] [{flow.Anchor.Method}] {trigger} -> {publishes}");
         }
     }
 }
