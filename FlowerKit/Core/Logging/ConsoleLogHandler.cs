@@ -2,6 +2,9 @@ using System;
 
 namespace FlowerKit.Core.Logging;
 
+/// <summary>
+/// The implementation that uses Console.WriteLine.
+/// </summary>
 public class ConsoleLogHandler : LogHandler
 {
     public override void Receive(LogMessage message)

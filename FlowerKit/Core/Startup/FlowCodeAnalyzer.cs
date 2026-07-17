@@ -54,7 +54,6 @@ public class FlowCodeAnalyzer
         var flows = CollectFlows(compilation);
 
         var graph = new FlowGraph(events, workflows, flows);
-        PrintGraph(graph);
         return graph;
     }
 

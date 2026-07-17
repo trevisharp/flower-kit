@@ -28,7 +28,9 @@ public record Test(params IEnumerable<Action> Actions)
         return chains;
     }
 
-    /// <summary>Stops collecting chains started by <see cref="BeginCollecting"/>.</summary>
+    /// <summary>
+    /// Stops collecting chains started by <see cref="BeginCollecting"/>.
+    /// </summary>
     internal static void EndCollecting()
         => activeChains = null;
 
