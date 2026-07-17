@@ -158,7 +158,7 @@ public static class Runtime
 
         while (true)
         {
-            Thread.Sleep(200);
+            Thread.Sleep(500);
             reloader.TryReload();
         }
     }
@@ -174,6 +174,8 @@ public static class Runtime
     /// </summary>
     static void Reload(Assembly assembly, Compilation compilation)
     {
+        Console.WriteLine($"Reloading code...");
+
         CurrentExecutor.Stop();
         Planner.Current.Reset();
 
