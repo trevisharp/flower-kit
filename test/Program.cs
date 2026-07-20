@@ -1,4 +1,5 @@
-﻿using FlowerKit;
+﻿using System.Linq.Expressions;
+using FlowerKit;
 
 Log.Config
     .AddAppName("FlowerExample")
@@ -48,7 +49,29 @@ record Employee(
     int ID,
     string Name,
     decimal Wage
-) : State();
+) : State(ctx => [
+    from e in ctx.Events
+    where e is EmployeeCreated
+    select ctx.Create()
+]);
+    /*
+    from e in events
+    where e is EmployeeCreated
+    select create(e.ID, e.Name, e.Wage),
+
+    from e in events
+    where e is EmployeePayRaised
+    join s in states
+    on s.ID equals e.ID
+    select update(e.ID, s.Name, e.Wage + s.Wage)
+
+    from e in events
+    where e is EmployeeDismissal
+    join s in states
+    on e.ID equals s.ID
+    select remove
+
+    */
 
 #endregion
 
