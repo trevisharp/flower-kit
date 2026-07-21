@@ -10,29 +10,38 @@ using Core.StateExpressions;
 /// </summary>
 public static class StateLinq
 {
-    public static StateExpression Select(
-        this StateExpression exp, 
-        Expression<Func<StateExpression, StateExpression>> selector
+    public static StateExpression<R> SelectMany<E, S, R>(
+        this StateExpression<E> exp,
+        Func<E, StateExpression<S>> pairing,
+        Func<E, S, R> selector
+    )
+    {
+        return null;
+    }
+    public static StateExpression<R> Select<T, R>(
+        this StateExpression<T> exp, 
+        Func<T, R> selector
+    )
+    {
+        return null;
+    }
+
+    public static StateExpression<T> Where<T>(
+        this StateExpression<T> exp, 
+        Expression<Func<T, bool>> selector
     )
     {
         return exp;
     }
 
-    public static StateExpression Where(
-        this StateExpression exp, 
-        Expression<Func<object, bool>> selector
+    public static StateExpression<R> Join<E, S, R>(
+        this StateExpression<E> exp,
+        StateExpression<S> other,
+        Expression<Func<E, object>> left,
+        Expression<Func<S, object>> rght,
+        Func<E, S, R> selector
     )
     {
-        return exp;
-    }
-
-    public static StateExpression Join(
-        this StateExpression exp,
-        Expression<Func<StateExpression, object>> left,
-        Expression<Func<StateExpression, object>> rght,
-        Expression<Func<StateExpression, StateExpression, StateExpression>> selector
-    )
-    {
-        return exp;
+        return null;
     }
 }

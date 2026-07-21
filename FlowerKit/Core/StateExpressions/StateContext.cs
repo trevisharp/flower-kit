@@ -1,3 +1,5 @@
+using System;
+
 namespace FlowerKit.Core.StateExpressions;
 
 /// <summary>
@@ -5,22 +7,14 @@ namespace FlowerKit.Core.StateExpressions;
 /// </summary>
 public class StateContext
 {
-    public StateExpression Events => new StateExpression();
+    public StateExpression<T> Events<T>() 
+        where T : Event => new(this);
 
-    public StateExpression States => new StateExpression();
+    public StateExpression<S> States<S>() 
+        where S : State => new(this);
 
-    public StateExpression Create(params object[] values)
+    public StateExpression Delete(State e)
     {
-        return new StateExpression();
-    }
-
-    public StateExpression Delete(params object[] values)
-    {
-        return new StateExpression();
-    }
-
-    public StateExpression Update(params object[] values)
-    {
-        return new StateExpression();
+        return new StateExpression(this);
     }
 }

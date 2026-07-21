@@ -12,33 +12,36 @@ Runtime.Run(args);
 
 record CreateEmployeeRequested(
     string Name,
-    decimal Wage
+    decimal Wage,
+    string Position
 ) : Event;
 
 record EmployeeCreated(
     int ID,
     string Name,
-    decimal Wage
+    decimal Wage,
+    string Position,
+    DateTime Moment
 ) : Event;
 
 record EmployeePayRaised(
     int ID,
-    decimal WageBonus
+    decimal BonusWage,
+    DateTime Moment
 ) : Event;
 
-record InternalOrder(
-    Guid ProcessID,
-    int EmployeeID,
-    int ProductID
+record EmployeePositionChanged(
+    int ID,
+    string NewPosition,
+    DateTime Moment
 ) : Event;
 
-record InternalOrderReject(
-    Guid ProcessID,
-    string Reason
+record FireEmployeeRequest(
+    int ID
 ) : Event;
 
-record InternalOrderApprove(
-    Guid ProcessID
+record EmployeeFired(
+    int ID
 ) : Event;
 
 #endregion
@@ -48,30 +51,35 @@ record InternalOrderApprove(
 record Employee(
     int ID,
     string Name,
-    decimal Wage
+    decimal Wage,
+    string Position,
+    DateTime ContractDate,
+    DateTime LastUpdate
 ) : State(ctx => [
-    from e in ctx.Events
-    where e is EmployeeCreated
-    select ctx.Create()
+    from e in ctx.Events<EmployeeCreated>()
+    select new Employee(e.ID, e.Name, e.Wage, e.Position, e.Moment, e.Moment),
+
+    from e in ctx.Events<EmployeeFired>()
+    from s in ctx.States<Employee>()
+    where e.ID == s.ID
+    select ctx.Delete(s),
+
+    from e in ctx.Events<EmployeePayRaised>()
+    from s in ctx.States<Employee>()
+    where e.ID == s.ID
+    select s with { 
+        Wage = s.Wage + e.BonusWage, 
+        LastUpdate = e.Moment
+    },
+
+    from e in ctx.Events<EmployeePositionChanged>()
+    from s in ctx.States<Employee>()
+    where e.ID == s.ID
+    select s with {
+        Position = e.NewPosition,
+        LastUpdate = e.Moment
+    }
 ]);
-    /*
-    from e in events
-    where e is EmployeeCreated
-    select create(e.ID, e.Name, e.Wage),
-
-    from e in events
-    where e is EmployeePayRaised
-    join s in states
-    on s.ID equals e.ID
-    select update(e.ID, s.Name, e.Wage + s.Wage)
-
-    from e in events
-    where e is EmployeeDismissal
-    join s in states
-    on e.ID equals s.ID
-    select remove
-
-    */
 
 #endregion
 
@@ -84,35 +92,4 @@ record EmployeeWorkflow() : Workflow(
     })
 );
 
-record InternalOrderWorkflow() : Workflow(
-    Flow.On<InternalOrder>(ctx =>
-    {
-        
-    })
-);
-
 #endregion
-
-record InternalOrderTest() : Test(
-    () =>
-    {
-        Assert<InternalOrderApprove>();
-
-        Publish<InternalOrder>.Emit(
-            ProcessID: Guid.NewGuid(),
-            EmployeeID: 1,
-            ProductID: 1
-        );
-    },
-
-    () =>
-    {
-        Assert<InternalOrderReject>(s => s.Last.Reason == "Price too high");
-
-        Publish<InternalOrder>.Emit(
-            ProcessID: Guid.NewGuid(),
-            EmployeeID: 1,
-            ProductID: 2
-        );
-    }
-);
